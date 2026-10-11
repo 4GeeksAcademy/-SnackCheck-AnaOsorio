@@ -1,0 +1,467 @@
+{
+  "name": "SnackCheck - Veredicto Nutricional",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "snackcheck",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "aa10597c-01f9-4d82-8ddb-eba7cf57b040",
+      "name": "01 - Webhook SnackCheck",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "notes": "Entrada del flujo. Configurado para GET en la ruta snackcheck; lee barcode desde los parámetros de consulta (query), no desde un cuerpo JSON. En modo prueba, escucha antes de enviar la petición.",
+      "position": [
+        -1120,
+        1824
+      ],
+      "webhookId": "c34027c5-eafb-4ca7-aeaf-51034de7cf35"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9bff5a0e-7e8d-4d5a-a76b-ea6feb359788",
+              "leftValue": "={{ /^\\d+$/.test(String($json.query?.barcode ?? '').trim()) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "beb2a19e-e868-479f-a369-b8f6d90d1aa5",
+      "name": "02 - ¿Barcode válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "notesInFlow": true,
+      "notes": "Valida query.barcode: debe ser una cadena no vacía compuesta solo por dígitos. La salida true consulta Open Food Facts; false devuelve un mensaje de entrada inválida.",
+      "position": [
+        -880,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ (() => { const barcode = String($('01 - Webhook SnackCheck').first().json.query?.barcode ?? '').trim(); return barcode ? { ok: false, code: 'INVALID_BARCODE', message: 'Código de barras inválido: debe contener solo números, sin letras, espacios ni guiones. Introduce los números de la etiqueta. Ejemplo: ?barcode=3017620422003.' } : { ok: false, code: 'BARCODE_REQUIRED', message: 'Falta el código de barras. Introduce un código numérico en el parámetro barcode. Ejemplo: ?barcode=3017620422003.' }; })() }}",
+        "options": {
+          "responseCode": "={{ String($('01 - Webhook SnackCheck').first().json.query?.barcode ?? '').trim() ? 400 : 200 }}"
+        }
+      },
+      "id": "5cb6503b-2fff-4e3d-bf2f-0cd7fd10581f",
+      "name": "02a - Respuesta de entrada inválida",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "notesInFlow": true,
+      "notes": "Cierra la rama de entrada inválida. Sin barcode devuelve 200 y BARCODE_REQUIRED; con caracteres no numéricos devuelve 400 y INVALID_BARCODE.",
+      "position": [
+        -640,
+        2016
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(String($('01 - Webhook SnackCheck').first().json.query.barcode).trim()) + '.json?fields=product_name,brands,nutriscore_grade,nutriments' }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "fe664331-dc2f-4443-afe9-f0ec5e0de098",
+      "name": "03 - Open Food Facts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "notesInFlow": true,
+      "notes": "Consulta el producto por barcode en la API pública de Open Food Facts. Devuelve cuerpo, status HTTP y JSON; el timeout es 10 s. Los errores de transporte siguen la salida de error hacia 03a.",
+      "position": [
+        -656,
+        1680
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":false,\"code\":\"PRODUCT_LOOKUP_UNAVAILABLE\",\"message\":\"No pudimos conectar con Open Food Facts o la consulta tardó demasiado. No necesitas cambiar el código de barras por este error; vuelve a enviar la consulta en unos momentos. Ejemplo: ?barcode=3017620422003.\"}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "3ffc02d9-ec9d-41fe-83ff-6db6f57ab4db",
+      "name": "03a - Error de consulta",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "notesInFlow": true,
+      "notes": "Respuesta de respaldo para errores de red o timeout de Open Food Facts. Devuelve HTTP 502 y PRODUCT_LOOKUP_UNAVAILABLE sin exponer detalles internos.",
+      "position": [
+        -464,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d5aeccce-a1a1-4882-9e79-33a71c3ef79b",
+              "leftValue": "={{ Number($json.statusCode) === 200 && Number($json.body?.status) === 1 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03c5ae98-0bed-4857-8f4b-0d042aceaff0",
+      "name": "04 - ¿Producto encontrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "notesInFlow": true,
+      "notes": "Considera encontrado el producto solo si el status HTTP es 200 y el cuerpo de Open Food Facts tiene status 1. True continúa al cálculo; false va a 04a.",
+      "position": [
+        -336,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ (() => { const status = Number($json.statusCode); const notFound = (status === 200 || status === 404) && Number($json.body?.status) === 0; return notFound ? { ok: false, code: 'PRODUCT_NOT_FOUND', message: 'Producto no encontrado en Open Food Facts. Comprueba los números de la etiqueta e introduce un código de barras válido de un producto registrado en esa base de datos. Ejemplo: ?barcode=3017620422003.' } : { ok: false, code: 'PRODUCT_LOOKUP_UNAVAILABLE', message: 'Open Food Facts devolvió un error o una respuesta no válida. No podemos confirmar si el producto existe. Vuelve a enviar la consulta en unos momentos. Ejemplo: ?barcode=3017620422003.' }; })() }}",
+        "options": {
+          "responseCode": "={{ (Number($json.statusCode) === 200 || Number($json.statusCode) === 404) && Number($json.body?.status) === 0 ? 404 : 502 }}"
+        }
+      },
+      "id": "360aba56-6d5e-446c-aa1a-84a20d8b7cae",
+      "name": "04a - Producto no encontrado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "notesInFlow": true,
+      "notes": "Distingue un producto ausente (HTTP 200 o 404 con body.status 0) de un fallo de la API. Devuelve HTTP 404 con PRODUCT_NOT_FOUND o HTTP 502 con PRODUCT_LOOKUP_UNAVAILABLE, con instrucciones y ejemplo.",
+      "position": [
+        -208,
+        1776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst api = response.body ?? response;\nconst product = api.product ?? {};\nconst raw = product.nutriments ?? {};\n\nconst readNumber = (value) => {\n  if (value === null || value === undefined || value === '') return null;\n  const number = Number(value);\n  return Number.isFinite(number) ? number : null;\n};\n\nconst measurements = {\n  sugar: readNumber(raw.sugars_100g),\n  salt: readNumber(raw.salt_100g),\n  fat: readNumber(raw.fat_100g),\n};\nconst available = Object.values(measurements).filter((value) => value !== null).length;\nconst allMeasurementsPresent = available === 3;\nconst grade = String(product.nutriscore_grade ?? '').trim().toLowerCase();\nconst validGrade = ['a', 'b', 'c', 'd', 'e'].includes(grade);\n\nconst semaphore = {\n  sugar: measurements.sugar === null\n    ? 'sin_dato'\n    : measurements.sugar < 5 ? 'bajo' : measurements.sugar <= 22.5 ? 'medio' : 'alto',\n  salt: measurements.salt === null\n    ? 'sin_dato'\n    : measurements.salt > 1.5 ? 'alto' : 'bajo',\n  fat: measurements.fat === null\n    ? 'sin_dato'\n    : measurements.fat > 17.5 ? 'alto' : 'bajo',\n};\nconst highCount = Object.values(semaphore).filter((level) => level === 'alto').length;\n\nconst rank = { saludable: 0, moderado: 1, 'no saludable': 2 };\nconst gradeVerdict = validGrade\n  ? ({ a: 'saludable', b: 'saludable', c: 'moderado', d: 'no saludable', e: 'no saludable' })[grade]\n  : null;\nconst semaphoreVerdict = allMeasurementsPresent\n  ? (highCount === 0 ? 'saludable' : highCount === 1 ? 'moderado' : 'no saludable')\n  : null;\nconst sufficientData = available > 0 && (validGrade || allMeasurementsPresent);\nconst readings = [gradeVerdict, semaphoreVerdict].filter(Boolean);\nconst verdict = sufficientData\n  ? readings.reduce((worst, current) => rank[current] > rank[worst] ? current : worst)\n  : null;\n\nconst marker = (level) => ({ bajo: '🟢', medio: '🟡', alto: '🔴', sin_dato: '⚪' })[level];\nconst energy = readNumber(raw['energy-kcal_100g']);\nconst headline = verdict === 'saludable'\n  ? 'Una buena opción para el día a día'\n  : verdict === 'moderado'\n    ? 'Mejor para disfrutar con moderación'\n    : verdict === 'no saludable'\n      ? 'Mejor dejarlo para un gusto ocasional'\n      : 'No hay datos suficientes para valorarlo';\n\nreturn [{ json: {\n  barcode: String($('01 - Webhook SnackCheck').first().json.query.barcode).trim(),\n  productName: product.product_name || 'Producto sin nombre',\n  brands: product.brands || null,\n  nutriscoreGrade: validGrade ? grade : null,\n  energyKcal100g: energy,\n  measurements,\n  semaphore: Object.fromEntries(Object.entries(semaphore).map(([key, level]) => [key, {\n    level, marker: marker(level), value: measurements[key], unit: 'g/100 g',\n  }])),\n  concernScore: available > 0 ? highCount : null,\n  concernScoreComplete: allMeasurementsPresent,\n  missingMeasurements: Object.entries(measurements).filter(([, value]) => value === null).map(([key]) => key),\n  gradeVerdict, semaphoreVerdict, sufficientData, verdict, headline,\n} }];"
+      },
+      "id": "c0e11618-ded9-4d70-b993-d6222d74094c",
+      "name": "05 - Calcular veredicto y semáforos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "notes": "Normaliza los nutrientes ausentes como null, calcula los semáforos, el conteo de preocupación y el peor veredicto entre nutrientes y Nutri-Score. Produce los campos consumidos por los nodos 06, 07 y 08.",
+      "position": [
+        -16,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4c42416e-c803-44e3-8708-49ae7348f45b",
+              "leftValue": "={{ $json.sufficientData === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a07e6276-ce7a-474a-b6cb-f842a9293001",
+      "name": "06 - ¿Datos suficientes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "notesInFlow": true,
+      "notes": "Envía a la IA solo productos con datos suficientes. Se requiere al menos un nutriente disponible y un Nutri-Score válido o las tres mediciones completas.",
+      "position": [
+        256,
+        1664
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ ok: false, code: 'INSUFFICIENT_NUTRITION_DATA', product: $json.productName, message: 'Producto encontrado, pero su ficha no tiene información nutricional suficiente para valorarlo. Prueba con otro producto con datos completos o completa la ficha en Open Food Facts y vuelve a consultar. Ejemplo de consulta con otro código: ?barcode=3017620422003.' }) }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "349e89d0-8743-4c85-aaca-9ac55678d413",
+      "name": "06a - Datos insuficientes",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "notesInFlow": true,
+      "notes": "Cierra la rama sin información suficiente. Devuelve HTTP 422 e INSUFFICIENT_NUTRITION_DATA; no clasifica campos vacíos como cero.",
+      "position": [
+        432,
+        1920
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Actúa como el asistente virtual de SnackCheck. Redacta un mensaje claro, empático y fácil de entender usando exclusivamente los datos que siguen. No cambies el veredicto ni los valores, no vuelvas a clasificar y no inventes nutrientes que no aparecen aquí.\n\nProducto: {{ $json.productName }}\nMarca: {{ $json.brands || 'sin dato' }}\nTitular calculado: {{ $json.headline }}\nVeredicto calculado: {{ $json.verdict }}\nNutri-Score: {{ $json.nutriscoreGrade ? $json.nutriscoreGrade.toUpperCase() : 'sin dato' }}\nPuntuación de preocupación: {{ $json.concernScore ?? 'sin dato' }} de 3\nAzúcar: {{ $json.measurements.sugar ?? 'sin dato' }} g/100 g ({{ $json.semaphore.sugar.level }})\nSal: {{ $json.measurements.salt ?? 'sin dato' }} g/100 g ({{ $json.semaphore.salt.level }})\nGrasa: {{ $json.measurements.fat ?? 'sin dato' }} g/100 g ({{ $json.semaphore.fat.level }})\nEnergía: {{ $json.energyKcal100g ?? 'sin dato' }} kcal/100 g\nMediciones ausentes: {{ $json.missingMeasurements.length ? $json.missingMeasurements.join(', ') : 'ninguna' }}\n\nDevuelve exactamente estas secciones:\n\nTitular: usa el titular calculado y añade Nutri-Score: **{{ $json.nutriscoreGrade ? $json.nutriscoreGrade.toUpperCase() : 'sin dato' }}**.\n\nDatos clave:\n{{ $json.semaphore.sugar.marker }} Azúcar: {{ $json.measurements.sugar ?? 'sin dato' }} g/100 g ({{ $json.semaphore.sugar.level }})\n{{ $json.semaphore.salt.marker }} Sal: {{ $json.measurements.salt ?? 'sin dato' }} g/100 g ({{ $json.semaphore.salt.level }})\n{{ $json.semaphore.fat.marker }} Grasa: {{ $json.measurements.fat ?? 'sin dato' }} g/100 g ({{ $json.semaphore.fat.level }})\nEnergía: {{ $json.energyKcal100g ?? 'sin dato' }} kcal/100 g\n\nExplicación: un párrafo breve, máximo 3 o 4 líneas. Sé alentador para saludable o moderado y delicado, cauteloso y sin juicios para no saludable. Si faltan mediciones, indícalo. No menciones fibra, proteínas ni otros nutrientes porque este flujo no los proporciona.",
+        "hasOutputParser": false
+      },
+      "id": "163327aa-e5bd-434a-a329-336d58ce634a",
+      "name": "07 - Redactar explicación",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "notesInFlow": true,
+      "notes": "Redacta las secciones del mensaje usando los valores de entrada del nodo (salida de 05). No recalcula el veredicto ni debe inventar nutrientes. El resultado de texto se consume como ai.text en 08.",
+      "position": [
+        528,
+        1648
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":false,\"code\":\"EXPLANATION_UNAVAILABLE\",\"message\":\"No pudimos generar la explicación nutricional porque falló el servicio de IA. No necesitas cambiar el código de barras; vuelve a enviar la consulta en unos momentos. Ejemplo: ?barcode=3017620422003. Si persiste, contacta con el responsable de SnackCheck.\"}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "9ac5f1d7-62dc-48e6-b42d-f5638f90b7dc",
+      "name": "07a - Error de explicación",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "notesInFlow": true,
+      "notes": "Cierra la salida de error del nodo 07 con HTTP 502 y EXPLANATION_UNAVAILABLE. Indica cómo reintentar sin exponer credenciales ni detalles internos.",
+      "position": [
+        816,
+        1888
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "6d086884-6a97-4c37-a073-dd20b2a74425",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        544,
+        1440
+      ],
+      "notesInFlow": true,
+      "notes": "Modelo de lenguaje Groq conectado al nodo 07. Selecciona una credencial Groq válida y confirma que el modelo configurado esté disponible; nunca incluyas la API key en el prompt ni en el JSON exportado.",
+      "credentials": {
+        "groqApi": {
+          "id": "bkKPupsbyvKKaJ4V",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ (() => { const result = $('05 - Calcular veredicto y semáforos').first().json; const ai = $('07 - Redactar explicación').first().json; return { ok: true, barcode: result.barcode, product: { name: result.productName, brands: result.brands }, headline: result.headline, verdict: result.verdict, nutriscore: result.nutriscoreGrade, concernScore: result.concernScore, concernScoreComplete: result.concernScoreComplete, nutrientsPer100g: { sugar: result.semaphore.sugar, salt: result.semaphore.salt, fat: result.semaphore.fat, energyKcal: result.energyKcal100g }, message: ai.text, source: 'Open Food Facts' }; })() }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "e5480935-c55a-4ca2-a63d-6df322ff86b0",
+      "name": "08 - Respuesta SnackCheck",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "notesInFlow": true,
+      "notes": "Devuelve HTTP 200 con la respuesta JSON final. Los valores nutricionales vienen del nodo 05 y message se lee de la propiedad text del nodo 07.",
+      "position": [
+        816,
+        1648
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 - Webhook SnackCheck": {
+      "main": [
+        [
+          {
+            "node": "02 - ¿Barcode válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 - ¿Barcode válido?": {
+      "main": [
+        [
+          {
+            "node": "03 - Open Food Facts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "02a - Respuesta de entrada inválida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 - Open Food Facts": {
+      "main": [
+        [
+          {
+            "node": "04 - ¿Producto encontrado?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "03a - Error de consulta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 - ¿Producto encontrado?": {
+      "main": [
+        [
+          {
+            "node": "05 - Calcular veredicto y semáforos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "04a - Producto no encontrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 - Calcular veredicto y semáforos": {
+      "main": [
+        [
+          {
+            "node": "06 - ¿Datos suficientes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 - ¿Datos suficientes?": {
+      "main": [
+        [
+          {
+            "node": "07 - Redactar explicación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "06a - Datos insuficientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 - Redactar explicación": {
+      "main": [
+        [
+          {
+            "node": "08 - Respuesta SnackCheck",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "07a - Error de explicación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "07 - Redactar explicación",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "1c01532b-7ccf-49a3-96e0-703506cdcaf8",
+  "meta": {
+    "instanceId": "2cac8e094f0d973f0424ca947b3cf6d40aa41a76a54cfe2644f0dfb9fe95c851"
+  },
+  "nodeGroups": [],
+  "id": "IDZEDR8Elu5CNmje",
+  "tags": []
+}
